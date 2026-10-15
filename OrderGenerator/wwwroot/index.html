@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order Generator</title>
+  <link rel="stylesheet" href="/css/site.css">
+  <style>.tnum { font-variant-numeric: tabular-nums; }</style>
+</head>
+<body class="bg-slate-950 text-slate-200 antialiased min-h-screen">
+  <header class="border-b border-slate-800 bg-slate-900/80">
+    <div class="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div>
+        <h1 class="text-lg font-semibold text-white">Order Generator</h1>
+        <p class="text-xs text-slate-400">FIX 4.4 Initiator · envio de NewOrderSingle</p>
+      </div>
+      <div id="health" class="inline-flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1 text-sm"
+           title="Estado da sessão FIX com o OrderAccumulator">
+        <span id="healthDot" class="h-2 w-2 rounded-full bg-slate-500"></span>
+        <span id="healthText">Verificando…</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 py-8 grid md:grid-cols-5 gap-8">
+    <section class="md:col-span-2">
+      <form id="form" class="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-5" novalidate>
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Nova ordem</h2>
+
+        <div>
+          <label class="block text-sm font-medium mb-1" for="symbol">Símbolo</label>
+          <select id="symbol" name="symbol"
+                  class="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option>PETR4</option><option>VALE3</option><option>VIIA4</option>
+          </select>
+        </div>
+
+        <div>
+          <span class="block text-sm font-medium mb-1">Lado</span>
+          <div class="grid grid-cols-2 gap-2" id="sides">
+            <button type="button" data-side="Buy" class="side rounded-lg border px-3 py-2 font-medium">Compra</button>
+            <button type="button" data-side="Sell" class="side rounded-lg border px-3 py-2 font-medium">Venda</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1" for="quantity">Quantidade</label>
+          <input id="quantity" name="quantity" type="number" inputmode="numeric" min="1" max="99999" step="1"
+                 placeholder="1 a 99.999"
+                 class="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 tnum focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <p class="mt-1 text-xs text-rose-400 hidden" id="err-quantity"></p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1" for="price">Preço (R$)</label>
+          <input id="price" name="price" type="number" inputmode="decimal" min="0.01" max="999.99" step="0.01"
+                 placeholder="0,01 a 999,99"
+                 class="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 tnum focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <p class="mt-1 text-xs text-rose-400 hidden" id="err-price"></p>
+        </div>
+
+        <div class="rounded-lg bg-slate-800/60 px-4 py-3 flex justify-between text-sm">
+          <span class="text-slate-400">Valor da ordem</span>
+          <span id="notional" class="font-semibold tnum text-white">R$ 0,00</span>
+        </div>
+
+        <button id="submit" type="submit"
+                class="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed px-4 py-2.5 font-semibold text-white transition">
+          Enviar ordem
+        </button>
+      </form>
+    </section>
+
+    <section class="md:col-span-3 space-y-6">
+      <div id="result" class="hidden rounded-xl border p-5" role="status"></div>
+
+      <div>
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Histórico desta sessão</h2>
+        <div class="rounded-xl border border-slate-800 bg-slate-900 divide-y divide-slate-800" id="history">
+          <p class="p-6 text-center text-slate-500 text-sm" id="historyEmpty">Nenhuma ordem enviada.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    let side = 'Buy';
+
+    const statusMeta = {
+      Accepted: { label: 'Aceita · ExecType=New', cls: 'border-emerald-700 bg-emerald-950/50 text-emerald-300' },
+      Rejected: { label: 'Rejeitada · ExecType=Rejected', cls: 'border-rose-700 bg-rose-950/50 text-rose-300' },
+      Timeout: { label: 'Sem resposta (timeout)', cls: 'border-amber-700 bg-amber-950/50 text-amber-300' },
+      SessionUnavailable: { label: 'Sessão FIX indisponível', cls: 'border-amber-700 bg-amber-950/50 text-amber-300' }
+    };
+
+    // ---- Lado ----
+    function paintSides() {
+      document.querySelectorAll('.side').forEach(b => {
+        const on = b.dataset.side === side;
+        const color = b.dataset.side === 'Buy' ? 'bg-emerald-600 border-emerald-500' : 'bg-sky-600 border-sky-500';
+        b.className = 'side rounded-lg border px-3 py-2 font-medium transition ' +
+          (on ? color + ' text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700');
+      });
+    }
+    $('sides').addEventListener('click', e => {
+      const b = e.target.closest('[data-side]');
+      if (b) { side = b.dataset.side; paintSides(); }
+    });
+    paintSides();
+
+    // ---- Valor estimado ----
+    function updateNotional() {
+      const q = parseInt($('quantity').value, 10), p = parseFloat($('price').value);
+      $('notional').textContent = brl.format(q > 0 && p > 0 ? q * p : 0);
+    }
+    $('quantity').addEventListener('input', updateNotional);
+    $('price').addEventListener('input', updateNotional);
+
+    // ---- Health do Accumulator ----
+    async function refreshHealth() {
+      let online = false;
+      try {
+        const r = await fetch('/api/status', { cache: 'no-store' });
+        online = (await r.json()).accumulatorOnline;
+      } catch { }
+      $('healthDot').className = 'h-2 w-2 rounded-full ' + (online ? 'bg-emerald-400' : 'bg-rose-500');
+      $('healthText').textContent = online ? 'OrderAccumulator online' : 'OrderAccumulator offline';
+      $('submit').disabled = !online;
+    }
+    refreshHealth();
+    setInterval(refreshHealth, 2000);
+
+    // ---- Envio ----
+    function showErrors(errors) {
+      for (const f of ['quantity', 'price']) {
+        const el = $('err-' + f);
+        el.textContent = errors[f] ? errors[f][0] : '';
+        el.classList.toggle('hidden', !errors[f]);
+      }
+    }
+
+    function addHistory(item) {
+      $('historyEmpty')?.remove();
+      const m = statusMeta[item.status] ?? { label: item.status, cls: '' };
+      const row = document.createElement('div');
+      row.className = 'px-4 py-3 flex items-center justify-between text-sm';
+      row.innerHTML = `<div>
+          <span class="font-medium text-white">${esc(item.symbol)}</span>
+          <span class="${item.side === 'Buy' ? 'text-emerald-400' : 'text-sky-400'}">${item.side === 'Buy' ? 'Compra' : 'Venda'}</span>
+          <span class="tnum text-slate-400">${item.quantity.toLocaleString('pt-BR')} × ${brl.format(item.price)}</span>
+          <div class="font-mono text-xs text-slate-500">${esc(item.clOrdId)}</div>
+        </div>
+        <span class="rounded border px-2 py-0.5 text-xs ${m.cls}">${esc(item.status)}</span>`;
+      $('history').prepend(row);
+    }
+
+    $('form').addEventListener('submit', async e => {
+      e.preventDefault();
+      showErrors({});
+      const quantity = parseInt($('quantity').value, 10);
+      const priceText = $('price').value.trim();
+      if (!Number.isInteger(quantity) || priceText === '') {
+        showErrors({ quantity: Number.isInteger(quantity) ? null : ['Informe a quantidade.'],
+                     price: priceText ? null : ['Informe o preço.'] });
+        return;
+      }
+      const symbol = $('symbol').value;
+      // Preço enviado como literal numérico do texto digitado (sem float intermediário).
+      const body = `{"symbol":"${symbol}","side":"${side}","quantity":${quantity},"price":${priceText}}`;
+
+      $('submit').disabled = true;
+      $('submit').textContent = 'Enviando…';
+      try {
+        const res = await fetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        const data = await res.json();
+        const box = $('result');
+        box.classList.remove('hidden');
+        if (res.status === 400) {
+          showErrors(data.errors ?? {});
+          box.className = 'rounded-xl border p-5 border-amber-700 bg-amber-950/50 text-amber-300';
+          box.innerHTML = '<p class="font-semibold">Dados inválidos</p>';
+          return;
+        }
+        const m = statusMeta[data.status] ?? { label: data.status, cls: 'border-slate-700 bg-slate-900' };
+        box.className = 'rounded-xl border p-5 ' + m.cls;
+        box.innerHTML = `<p class="font-semibold">${esc(m.label)}</p>
+          <dl class="mt-3 text-sm space-y-1 text-slate-300">
+            <div class="flex justify-between"><dt>ClOrdID</dt><dd class="font-mono text-xs">${esc(data.clOrdId)}</dd></div>
+            <div class="flex justify-between"><dt>Ordem</dt><dd class="tnum">${esc(symbol)} · ${side === 'Buy' ? 'Compra' : 'Venda'} · ${quantity.toLocaleString('pt-BR')} × ${brl.format(parseFloat(priceText))}</dd></div>
+            ${data.text ? `<div class="flex justify-between gap-4"><dt>Motivo</dt><dd class="text-right">${esc(data.text)}</dd></div>` : ''}
+          </dl>`;
+        addHistory({ ...data, symbol, side, quantity, price: parseFloat(priceText) });
+      } catch {
+        const box = $('result');
+        box.className = 'rounded-xl border p-5 border-rose-700 bg-rose-950/50 text-rose-300';
+        box.textContent = 'Erro ao contatar o servidor.';
+      } finally {
+        $('submit').textContent = 'Enviar ordem';
+        refreshHealth();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order Accumulator · Monitor</title>
+  <link rel="stylesheet" href="/css/site.css">
+  <style>.tnum { font-variant-numeric: tabular-nums; }</style>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans antialiased min-h-screen">
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div>
+        <h1 class="text-lg font-semibold text-white">Order Accumulator</h1>
+        <p class="text-xs text-slate-400">FIX 4.4 Acceptor · exposição por símbolo em tempo real</p>
+      </div>
+      <div class="flex items-center gap-3 text-sm">
+        <span id="stream" class="inline-flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1">
+          <span class="h-2 w-2 rounded-full bg-slate-500" id="streamDot"></span><span id="streamText">Conectando…</span>
+        </span>
+        <span id="fix" class="inline-flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1">
+          <span class="h-2 w-2 rounded-full bg-slate-500" id="fixDot"></span><span id="fixText">FIX</span>
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    <section class="grid grid-cols-2 md:grid-cols-5 gap-4" id="kpis"></section>
+
+    <section>
+      <div class="flex items-baseline justify-between mb-3">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Exposição por símbolo</h2>
+        <span class="text-xs text-slate-500">Limite absoluto: <span id="limit" class="tnum text-slate-300"></span></span>
+      </div>
+      <div id="symbols" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+    </section>
+
+    <section>
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Ordens recentes</h2>
+      <div class="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
+        <table class="min-w-full text-sm">
+          <thead class="text-xs uppercase text-slate-400 bg-slate-900 border-b border-slate-800">
+            <tr>
+              <th class="px-4 py-3 text-left">Hora</th>
+              <th class="px-4 py-3 text-left">ClOrdID</th>
+              <th class="px-4 py-3 text-left">Símbolo</th>
+              <th class="px-4 py-3 text-left">Lado</th>
+              <th class="px-4 py-3 text-right">Qtd</th>
+              <th class="px-4 py-3 text-right">Preço</th>
+              <th class="px-4 py-3 text-right">Valor</th>
+              <th class="px-4 py-3 text-left">Resultado</th>
+              <th class="px-4 py-3 text-right">Exposição após</th>
+            </tr>
+          </thead>
+          <tbody id="orders" class="divide-y divide-slate-800"></tbody>
+        </table>
+        <p id="empty" class="p-8 text-center text-slate-500">Aguardando ordens…</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+    const num = new Intl.NumberFormat('pt-BR');
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    function setDot(dot, text, on, label) {
+      $(dot).className = 'h-2 w-2 rounded-full ' + (on ? 'bg-emerald-400' : 'bg-rose-500');
+      $(text).textContent = label;
+    }
+
+    function kpi(label, value, tone = 'text-white') {
+      return `<div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-400">${label}</p>
+        <p class="mt-1 text-2xl font-semibold tnum ${tone}">${value}</p></div>`;
+    }
+
+    function render(s) {
+      $('limit').textContent = brl.format(s.limit);
+      const sess = s.fix.sessions.length;
+      setDot('fixDot', 'fixText', s.fix.loggedOn,
+        s.fix.loggedOn ? `FIX conectado (${sess} sessão)` : 'FIX sem sessão');
+
+      const t = s.totals;
+      const allOk = s.symbols.every(x => x.withinLimit && x.consistent);
+      $('kpis').innerHTML =
+        kpi('Ordens', num.format(t.total)) +
+        kpi('Aceitas', num.format(t.accepted), 'text-emerald-400') +
+        kpi('Rejeitadas', num.format(t.rejected), 'text-rose-400') +
+        kpi('Duplicadas', num.format(t.duplicates), 'text-amber-400') +
+        kpi('Regras', allOk ? '✓ OK' : '✗ Violação', allOk ? 'text-emerald-400' : 'text-rose-400');
+
+      $('symbols').innerHTML = s.symbols.map(x => {
+        const pct = Math.min(100, Math.abs(x.exposure) / s.limit * 100);
+        const bar = pct >= 95 ? 'bg-rose-500' : pct >= 80 ? 'bg-amber-400' : 'bg-emerald-500';
+        const sign = x.exposure > 0 ? 'text-emerald-400' : x.exposure < 0 ? 'text-sky-400' : 'text-slate-300';
+        const audit = x.audited === null
+          ? '<span class="text-slate-500">auditoria indisponível</span>'
+          : x.consistent ? '<span class="text-emerald-400">✓ auditoria confere</span>'
+                         : '<span class="text-rose-400">✗ divergência na auditoria</span>';
+        return `<div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-white">${esc(x.symbol)}</h3>
+            <span class="text-xs ${x.withinLimit ? 'text-emerald-400' : 'text-rose-400'}">
+              ${x.withinLimit ? '✓ dentro do limite' : '✗ acima do limite'}</span>
+          </div>
+          <p class="mt-3 text-2xl font-semibold tnum ${sign}">${brl.format(x.exposure)}</p>
+          <div class="mt-3 h-2 rounded-full bg-slate-800 overflow-hidden">
+            <div class="h-full ${bar} transition-all duration-500" style="width:${pct.toFixed(2)}%"></div>
+          </div>
+          <div class="mt-2 flex justify-between text-xs text-slate-400">
+            <span class="tnum">${pct.toFixed(2)}% do limite</span>${audit}
+          </div></div>`;
+      }).join('');
+
+      $('empty').style.display = s.orders.length ? 'none' : 'block';
+      $('orders').innerHTML = s.orders.map(o => {
+        const time = new Date(o.timestamp).toLocaleTimeString('pt-BR');
+        const side = o.side === 'Buy'
+          ? '<span class="text-emerald-400">Compra</span>' : o.side === 'Sell'
+          ? '<span class="text-sky-400">Venda</span>' : '?';
+        const badge = o.duplicate
+          ? '<span class="rounded bg-amber-500/15 text-amber-300 px-2 py-0.5 text-xs">Duplicada</span>'
+          : o.status === 'Accepted'
+            ? '<span class="rounded bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-xs">New</span>'
+            : '<span class="rounded bg-rose-500/15 text-rose-300 px-2 py-0.5 text-xs">Rejected</span>';
+        const reason = o.status === 'Rejected' ? `<div class="text-xs text-slate-500">${esc(o.text || o.rejectReason)}</div>` : '';
+        return `<tr class="hover:bg-slate-800/40">
+          <td class="px-4 py-2 tnum text-slate-400">${time}</td>
+          <td class="px-4 py-2 font-mono text-xs text-slate-400" title="${esc(o.clOrdId)}">${esc(o.clOrdId.slice(0, 8))}…</td>
+          <td class="px-4 py-2 font-medium text-white">${esc(o.symbol)}</td>
+          <td class="px-4 py-2">${side}</td>
+          <td class="px-4 py-2 text-right tnum">${num.format(o.quantity)}</td>
+          <td class="px-4 py-2 text-right tnum">${brl.format(o.price)}</td>
+          <td class="px-4 py-2 text-right tnum">${brl.format(o.notional)}</td>
+          <td class="px-4 py-2">${badge}${reason}</td>
+          <td class="px-4 py-2 text-right tnum">${brl.format(o.exposureAfter)}</td></tr>`;
+      }).join('');
+    }
+
+    function connect() {
+      const es = new EventSource('/api/stream');
+      es.onopen = () => setDot('streamDot', 'streamText', true, 'Tempo real');
+      es.onmessage = e => render(JSON.parse(e.data));
+      es.onerror = () => setDot('streamDot', 'streamText', false, 'Reconectando…');
+    }
+    connect();
+  </script>
+</body>
+</html>

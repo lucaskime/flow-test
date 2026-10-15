@@ -1,0 +1,12 @@
+{
+  "name": "flowa-loadtests",
+  "private": true,
+  "scripts": {
+    "smoke": "k6 run -e PROFILE=smoke scenarios/orders.js",
+    "load": "k6 run -e PROFILE=load scenarios/orders.js",
+    "stress": "k6 run -e PROFILE=stress scenarios/orders.js",
+    "spike": "k6 run -e PROFILE=spike scenarios/orders.js",
+    "rejections": "k6 run scenarios/rejections.js",
+    "soak": "k6 run -e PROFILE=soak scenarios/orders.js"
+  }
+}

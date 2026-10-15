@@ -1,0 +1,75 @@
+# --- .NET -------------------------------------------------------------------
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+publish/
+*.user
+*.suo
+*.userprefs
+*.nupkg
+*.snupkg
+launchSettings.local.json
+
+# Testes e cobertura
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+coverage.*.xml
+coverage.cobertura.xml
+
+# Logs e dumps
+*.log
+*.dmp
+
+# --- Estado em runtime (QuickFIX/n e decisões do Accumulator) ---------------
+# Sequências FIX, mensagens e decisions.jsonl: nunca versionar.
+fix-data/
+**/fix-data/
+
+# --- Configuração local e segredos ------------------------------------------
+appsettings.Local.json
+appsettings.*.local.json
+secrets.json
+.env
+.env.*
+!.env.example
+
+# --- k6 / Node (LoadTests) --------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+LoadTests/results/
+LoadTests/*.json
+!LoadTests/package.json
+!LoadTests/package-lock.json
+*.k6.json
+resultado*.json
+summary.json
+
+# --- IDEs e editores --------------------------------------------------------
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.sln.DotSettings.user
+*.DotSettings.user
+.rider/
+*.swp
+*~
+
+# --- Ferramentas de IA (configuração local) ---------------------------------
+.claude/settings.local.json
+
+# --- Sistema operacional ----------------------------------------------------
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini

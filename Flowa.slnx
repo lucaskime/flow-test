@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="OrderAccumulator.Tests/OrderAccumulator.Tests.csproj" />
+  <Project Path="OrderAccumulator/OrderAccumulator.csproj" />
+  <Project Path="OrderGenerator.Tests/OrderGenerator.Tests.csproj" />
+  <Project Path="OrderGenerator/OrderGenerator.csproj" />
+</Solution>
